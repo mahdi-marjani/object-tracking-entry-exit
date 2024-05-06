@@ -1,0 +1,6 @@
+a person entered at 2024-05-06 13:17:58
+a person entered at 2024-05-06 13:18:17
+a person exited at 2024-05-06 13:18:26
+a person exited at 2024-05-06 13:18:30
+a person entered at 2024-05-06 13:18:31
+a person entered at 2024-05-06 13:18:41

@@ -1,6 +1,6 @@
-a person entered at 2024-05-06 13:17:58
-a person entered at 2024-05-06 13:18:17
-a person exited at 2024-05-06 13:18:26
-a person exited at 2024-05-06 13:18:30
-a person entered at 2024-05-06 13:18:31
-a person entered at 2024-05-06 13:18:41
+1 person exited 2024-05-08 14:39:40
+1 person exited 2024-05-08 14:39:55
+1 person entered 2024-05-08 14:40:00
+1 person entered 2024-05-08 14:40:03
+1 person exited 2024-05-08 14:40:03
+1 person exited 2024-05-08 14:40:11

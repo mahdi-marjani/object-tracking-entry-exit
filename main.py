@@ -1,122 +1,61 @@
 import cv2
 from ultralytics import YOLO
 from datetime import datetime
-from centroidtracker import CentroidTracker
+from ultralytics.solutions import object_counter
 
-model = YOLO('./models/yolov8s.pt')
+model = YOLO("./models/yolov8n.pt")
+cap = cv2.VideoCapture("./videos/people.mp4")
+assert cap.isOpened(), "Error reading video file"
+w, h, fps = (int(cap.get(x)) for x in (cv2.CAP_PROP_FRAME_WIDTH, cv2.CAP_PROP_FRAME_HEIGHT, cv2.CAP_PROP_FPS))
 
-ct = CentroidTracker(maxDisappeared=10)
+line_points = [(120, 380), (580, 252)]  # line or region points
+classes_to_count = [0,]  # person and car classes for count
 
-entry_exit_line = (120, 380), (580, 252)
+# Video writer
+video_writer = cv2.VideoWriter("./videos/object_counting_output.mp4",
+                    cv2.VideoWriter_fourcc(*'mp4v'),
+                    fps,
+                    (w, h))
 
-cap = cv2.VideoCapture('./videos/people.mp4')
+# Init Object Counter
+counter = object_counter.ObjectCounter()
+counter.set_args(view_img=True,
+    reg_pts=line_points,
+    classes_names=model.names,
+    draw_tracks=True,
+    line_thickness=2)
 
-def determine_crossing(prev_point, curr_point, entry_exit_line):
-    (x1, y1), (x2, y2) = entry_exit_line
-    
-    side_prev = (x2 - x1) * (prev_point[1] - y1) - (y2 - y1) * (prev_point[0] - x1)
-    side_curr = (x2 - x1) * (curr_point[1] - y1) - (y2 - y1) * (curr_point[0] - x1)
+prev_in_counts = 0
+prev_out_counts = 0
 
-    if side_prev * side_curr < 0:
-        if side_curr < 0:
-            return "entered"
-        else:
-            return "exited"
-    else:
-        return None
-
-def is_crossed_entry_exit_line(prev_point, curr_point, entry_exit_line):
-    (x1, y1), (x2, y2) = entry_exit_line
-    
-    if x1 == x2:
-        if (prev_point[0] < x1 and curr_point[0] > x1) or \
-           (prev_point[0] > x1 and curr_point[0] < x1):
-            if min(prev_point[1], curr_point[1]) < max(y1, y2) and max(prev_point[1], curr_point[1]) > min(y1, y2):
-                return determine_crossing(prev_point, curr_point, entry_exit_line)
-        return None
-    else:
-        m = (y2 - y1) / (x2 - x1)
-        c = y1 - m * x1
-
-        prev_y_on_line = m * prev_point[0] + c
-        curr_y_on_line = m * curr_point[0] + c
-
-        if (prev_point[1] < prev_y_on_line and curr_point[1] > curr_y_on_line) or \
-           (prev_point[1] > prev_y_on_line and curr_point[1] < curr_y_on_line):
-            if min(prev_point[0], curr_point[0]) < max(x1, x2) and max(prev_point[0], curr_point[0]) > min(x1, x2):
-                return determine_crossing(prev_point, curr_point, entry_exit_line)
-        return None
-
-def is_not_on_line(point, line):
-    (x1, y1), (x2, y2) = line
-    x, y = point[0], point[1]
-    return abs((x2 - x1) * (y - y1) - (y2 - y1) * (x - x1)) > 1
-
-prev_centroids = {}
-
-entry_count = 0
-exit_count = 0
-
-fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-ret, frame = cap.read()
-out = cv2.VideoWriter('./videos/output.mp4', fourcc, 20.0, (frame.shape[1], frame.shape[0]))
-
-while True:
-    ret, frame = cap.read()
-    if not ret:
+while cap.isOpened():
+    success, im0 = cap.read()
+    if not success:
+        print("Video frame is empty or video processing has been successfully completed.")
         break
     
-    result = model.predict(frame)
+    tracks = model.track(im0, persist=True, show=False,
+                         classes=classes_to_count)
 
-    cv2.line(frame, entry_exit_line[0], entry_exit_line[1], (0, 140, 255), 3)
+    im0 = counter.start_counting(im0, tracks)
 
-    result_boxes = result[0].boxes.xyxy
+    in_diff = counter.in_counts - prev_in_counts
+    out_diff = counter.out_counts - prev_out_counts
 
-    rects = []
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    if in_diff > 0:
+        with open("report.txt", "a") as file:
+            file.write(f"{in_diff} person entered {current_time}\n")
+    elif out_diff > 0:
+        with open("report.txt", "a") as file:
+            file.write(f"{out_diff} person exited {current_time}\n")
 
-    for i in range(len(result_boxes)):
-        is_person = result[0].boxes.cls[i] == 0
-        if is_person and result[0].boxes.conf[i] > 0.3:
-            box = result_boxes[i]
-            startX, startY, endX, endY = int(box[0]), int(box[1]), int(box[2]), int(box[3])
-            rects.append((startX, startY, endX, endY))
-            cv2.rectangle(frame, (startX, startY), (endX, endY), (0, 255, 0), 2)
-            cv2.circle(frame, (int((startX + endX) / 2), int((startY + endY) / 2)), 5, (0, 0, 255), -1)
+    prev_in_counts = counter.in_counts
+    prev_out_counts = counter.out_counts
 
-    objects = ct.update(rects)
-
-    for objectID, centroid in objects.items():
-        text = f"ID {objectID}"
-        cv2.putText(frame, text, (centroid[0] - 10, centroid[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-        cv2.circle(frame, (centroid[0], centroid[1]), 4, (0, 255, 0), -1)
-
-        if objectID in prev_centroids:
-            prev_centroid = prev_centroids[objectID]
-            curr_centroid = centroid
-
-            result = is_crossed_entry_exit_line(prev_centroid, curr_centroid, entry_exit_line)
-            if result is not None:
-                with open('report.txt', 'a') as f:
-                    time = datetime.now()
-                    f.write(f"a person {result} at {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-                    if result == "entered":
-                        entry_count += 1
-                    elif result == "exited":
-                        exit_count += 1
-
-        if is_not_on_line(centroid, entry_exit_line):
-            prev_centroids[objectID] = centroid
-
-    cv2.rectangle(frame, (750, 300), (950, 370), (0, 255, 0), cv2.FILLED)
-    cv2.putText(frame, f"Entry: {entry_count}", (750, 350), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 0), 4)
-    cv2.rectangle(frame, (1000, 300), (1170, 370), (0, 0, 255), cv2.FILLED)
-    cv2.putText(frame, f"Exit: {exit_count}", (1000, 350), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 0), 4)
-
-    out.write(frame)
-    cv2.imshow('frame', frame)
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+    video_writer.write(im0)
 
 cap.release()
-out.release()
+video_writer.release()
 cv2.destroyAllWindows()
